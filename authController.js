@@ -1,10 +1,16 @@
 import User from './models/user.js'
 import Role from './models/role.js'
 import bcrypt from 'bcrypt'
+import {validationResult} from 'express-validator'
 
 class AuthController {
     async registration(req, res) {
         try {
+            // проверяем наличие ошиббок валидации
+            const errors = validationResult(req) 
+            if(!errors.isEmpty()){
+                return res.status(400).json({message: 'ошибка при регистрации', errors })
+            }
             // вытаскиваем логин и пароль из  тела запроса
             const {username, password} = req.body
             // проверяем есть ли у нас в базе пользователь с таким именем
