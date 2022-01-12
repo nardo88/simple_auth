@@ -2,6 +2,24 @@ import User from './models/user.js'
 import Role from './models/role.js'
 import bcrypt from 'bcrypt'
 import {validationResult} from 'express-validator'
+import jwt from 'jsonwebtoken'
+import config from './config.js'
+
+// функция принимает id пользователя и его роли, что бы зашить в JWT эти данные
+const generateAccessToken = (id, roles) => {
+    // создаем объект который будет содержать необходимые данные
+    const payload = {
+        id, 
+        roles
+    }
+    // метод sign генерирует JWT. В качестве аргумента он 
+    // принимает объект с данными которые будут зашиты в токен
+    // вторым аргументом нужно переждать секретный ключ
+    // третьим аргументом мы передаем объект с параметрами токена. 
+    // например передаем expiresIn - который говорит о том сколько будет жить токен
+    // в нашем примере это 24 часа
+    return jwt.sign(payload, config.secret, {expiresIn: '24h'})
+}
 
 class AuthController {
     async registration(req, res) {
@@ -40,7 +58,26 @@ class AuthController {
 
     async login(req, res) {
         try {
-            
+            // вытаскиваем логин и пароль из тела запроса
+            const {username, password} = req.body
+            // затем находим в базе пользователя с таким логином
+            const user = await User.findOne({username: username})
+            // если пользователя нет, возращаем статус 404
+            if(!user){
+                return res.status(404).json({massage: `пользователь ${username} не найден`})
+            }
+            // validPassword будет в себе содержать будевое значение проверки на соответсвтие паролей
+            // пароль в базе у нас захешированный поэтому воспользуется методом compareSync
+            // который принимает сначала пароль обычный и затем захешированный пароль
+            const validPassword = bcrypt.compareSync(password, user.password)
+            // если пароль не валидный возвращаем ошибку
+            if(!validPassword){
+                return res.status(400).json({massage: `Не верный пароль`})
+            }
+            // создаем JWT
+            const token = generateAccessToken(user._id, user.roles)
+            res.json({token})
+
         } catch (error) {
             console.log(error)
             res.status(400).json({massage: error})
@@ -49,14 +86,29 @@ class AuthController {
 
     async getUsers(req, res) {
         try {
-            const userRole = new Role()
-            const adminRole = new Role({value: 'ADMIN'})
-            await userRole.save()
-            await adminRole.save()
-            res.json('server works')
+            // получаем токен из заголовков
+            const token = req?.headers?.authorization?.split(' ')[1] 
+            if(!token){
+                return res.status(400).json({massage: 'Пользователь не авторизован'})
+            }
+            // что бы вытащить из JWT зашифрованные данные воспользуемся методом verify
+            // первым аргументом передаем токен, а вторым секретный ключ
+            // decodedData будет содержать в себе объект с закодированными данными
+            const decodedData = jwt.verify(token, config.secret)
+            // если в закодированных ролях есть роль пользователя
+            if(decodedData.roles.includes('USER')){
+                // получаем всех пользователей
+                const users = await User.find()
+                // и высылаем на клиент
+                return res.json(users)
+            } else {
+                // иначе возвращаем ошибку
+                return res.json({message: 'Нет доступа'})
+            }
             
         } catch (error) {
-            
+            console.log(error)
+            res.status(400).json({massage: error})
         }
     }
 }
